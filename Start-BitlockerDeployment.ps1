@@ -312,7 +312,7 @@
         }
     }
 
-    Function local:Set-RegistryKey {
+    Function Set-RegistryKey {
         <#
             .SYNOPSIS
                 Used to set registry key value.
@@ -448,6 +448,8 @@
                     $RegistryKey.close()
                     Write-nLog -Type:'Debug' -Message:$lMSG.Replace('{0}','Success')
                 } Catch {Write-Error -ErrorId:'' -Message:$lMSG.Replace('{0}','Failure')}
+
+                Return $Result
             }))
 
             New-Variable @varSplat -Name:'HiveTypeDB' -Value:(@{
@@ -471,9 +473,11 @@
         #endregion [Parameter Validation],#')}]#")}]#'")}]------------------------------------------------------------
 
         #region [Variable Initializations] ---------------------------------------------------------------------------
-        New-Variable @verSplat -Scope:'Private' -Name:'Variables' -Value:@{'RegistryKey'=[Microsoft.Win32.RegistryKey];
+        New-Variable @varSplat -Scope:'Private' -Name:'Variables' -Value:@{'RegistryKey'=[Microsoft.Win32.RegistryKey];
             'RegistrySubKey'=$Null;'RegistrySubKeyKind'=$Null;
         }
+
+        New-Variable @varSplat -Name:'Result' -Value:@{'Changes'=[Int]0;'ExitCode'=[Int]0}
 
         #endregion [Variable Initializations],#')}]#")}]#'")}]--------------------------------------------------------
 
@@ -496,11 +500,11 @@
                 Write-nLog -Type:'Debug' -Message:$lMSG.Replace('{0}','Success')
             } Catch { Write-Error -ErrorId:'' -Exception:$lMSG.Replace('{0}','Failure') }
 
-            $lMSG="Checking for the existance of registry subkey [Path: '$RegistryHive\$Path']: {0}"
+            $lMSG="Checking for the existance of registry key [Path: '$RegistryHive\$Path']: {0}"
             If (Test-Path @verSplat -Path:"Registry::$RegistryHive\$Path" -PathType:'Container') {
                 Write-nLog -Type:'Debug' -Message:$lMSG.replace('{0}','Found')
 
-                Try { $lMSG = "Attempting to open registry subkey. [Path: '$RegistryHive\$Path']: {0}"
+                Try { $lMSG = "Attempting to open registry key. [Path: '$RegistryHive\$Path']: {0}"
                     $RegistrySubKey = $RegistryKey.OpenSubKey($Path,$True)
                     Write-nLog -Type:'Debug' -Message:$lMSG.Replace('{0}','Success')
                 } Catch { Write-Error -ErrorId:'' -Exception:$lMSG}
@@ -509,7 +513,7 @@
                 Write-nLog -Type:'Debug' -Message:$lMSG.replace('{0}','Not Found')
 
                 If ($CreateKey) {
-                    Try {$lMSG="Creating subkey. [Path: '$RegistryHive\$Path']: {0}"
+                    Try {$lMSG="Creating registry key. [Path: '$RegistryHive\$Path']: {0}"
                         Set-Variable @varSplat -Name:'RegistrySubKey' -Value:($RegistryKey.CreateSubKey($Path))
                         Write-nLog -Type:'Debug' -Message:$lMSG.Replace('{0}','Success')
                     } Catch { Write-Error -ErrorId:'' -Exception:$lMSG}
@@ -520,7 +524,7 @@
             }
 
 
-            $lMSG="Checking if subkey already contains '$Name' property: {0}"
+            $lMSG="Checking if key already contains '$Name' property: {0}"
             IF ($RegistrySubKey.GetValueNames() -contains $Name) {
                 Write-nLog -Type:'Debug' -Message:$lMSG.replace('{0}','Found')
 
@@ -532,7 +536,7 @@
 
 
                 IF ($RegistrySubKeyKind -ne $DataType) {
-                    Write-nLog -Type:'Info' -Message:"Registry property type is '$($RegistryKey.GetValueKind($Name))' but expected '$($DataTypeDB[$DataType])."
+                    Write-nLog -Type:'Info' -Message:"Registry property type is '$($RegistryKey.GetValueKind($Name))' but expected '$($DataType)."
                     If ($FixDataType) {
                         Set-Variable -Name:'KeyAction' -Value:'Replace'
                     } Else {
@@ -565,8 +569,9 @@
                     Write-nLog -Type:'Info' -Message:$lMSG.Replace('{0}','Success')
                 } Catch {Write-Error -ErrorId:'' -Message:$lMSG.Replace('{0}','Failure')}
 
+                $Result.Changes++
             } ElseIf ($KeyAction -eq 'Done') {
-                Write-nLog -Type:'Info' -Message:'Registry setting is already configured correctly.'
+                Write-nLog -Type:'Info' -Message:"Registry key property '$RegistryHive\$Path\$Name' is already set correctly. [Type: $DataType; Value: $Value]"
             } Else {
                 Write-Error -ErrorId:'' -Message:"Variable `$KeyAction has unknown value of '$KeyAction'."
             }
@@ -689,12 +694,32 @@
                     $BdeHdCfg.Status = 'Configured'
                 }
                 Default {
-                    Write-Information -MessageData "$Line"
+                    #Write-Information -MessageData "$Line"
                 }
             }
         }
 
         Return $BdeHdCfg
+
+    }
+
+    Function Start-Restart {
+
+        Param(
+            [String]$BeginWindow = '23:00',
+            [string]$EndWindow = '23:59'
+        )
+
+        New-Variable -Force -Name:'Now' -Value:([DateTime]::Now)
+        Set-Variable -Force -Name:'BeginWindow' -Value:([datetime]::Parse($BeginWindow))
+        Set-Variable -Force -Name:'EndWindow' -Value:([datetime]::Parse($EndWindow))
+
+        If ($Now -ge $BeginWindow -and $Now -le $EndWindow) {
+            Write-nLog -Type:'Info' -Message:'Inside of maintenance window; Restarting computer.'
+            Restart-Computer -Force -ComputerName:$env:COMPUTERNAME -Delay:'60'
+        } Else {
+            Write-nLog -Type:'Info' -Message:'Outside of maintenance window.'
+        }
 
     }
 
@@ -820,81 +845,156 @@
     #Startup Write-nLog function.
     Write-nLog -Initialize -Type Debug -Message "Starting nLog function."-SetLogLevel:$LogLevel -SetWriteHost $True -SetWriteLog $True -SetTimeLocalization Local -SetLogFormat CMTrace
 
-    #region [Script Prerequisits] ---------------------------------------------------------
+    #region [Script Prerequisits] --------------------------------------------------------------------------------
 
-    #endregion [Script Prerequisits],#')}]#")}]#'")}]
+        New-Variable -Force -Name:'varSplat' -Value:@{'Verbose'=$Verbose;Force=$True}
+        New-Variable @varSplat -Name:'RestartRequired' -Value:$False
+
+    #endregion [Script Prerequisits],#')}]#")}]#'")}]-------------------------------------------------------------
+
+    #region [End Script Function] --------------------------------------------------------------------------------
+        New-Variable @varSplat -Scope:'Private' -Name:'EndScript' -Value:([ScriptBlock]::Create({
+            Write-nLog -Close -Type:'Info' -Message:'Exiting Script'
+            Return $Result
+        }))
+    #endregion [End Script Function],#')}]#")}]#'")}]-------------------------------------------------------------
 
     #Remove-Variable -Name @('ScriptConfig','ScriptEnv','Process') -Force -ErrorAction SilentlyContinue
 #endregion [Initializations & Prerequisites],#')}]#")}]#'")}]
 
-#region ------------------------------------------------- [Main Script] ---------------------------------------------------------
+#region ------------------------------------------------- [Main Script] ------------------------------------------
 
+    #region [Loading System Information] -------------------------------------------------------------------------
+        Write-nLog -Type:'Info' -Message:'Step 1: Loading system information.'
 
-    New-Variable -Force -Name:'BitLockerVolume' -Value:(Get-BitLockerVolume -MountPoint:$env:SystemDrive)
+        Try {$lMSG = 'Loading Bitlocker Volume information: {0}'
+            New-Variable @varSplat -Name:'BitLockerVolume' -Value:(Get-BitLockerVolume -MountPoint:$env:SystemDrive)
+            Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+        } Catch {Write-Error -ErrorId:'20' -Message:($lMSG -f 'Failure')}
 
-    New-Variable -Force -Name:'RestartRequired' -Value:$False
+        Try {$lMSG = 'Initializing LocalCimSession; speeds up CimInstance Calls: {0}'
+            New-Variable @varSplat -Name:'LocalCimSession' -Value:(
+                New-CimSession -ComputerName:"localhost" –SessionOption (New-CimSessionOption –Protocol:'DCOM'))
+            Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+        } Catch {Write-Error -ErrorId:'21' -Message:($lMSG -f 'Failure')}
 
-    #region [Loading System Information] ---------------------------------------------------------
+        #region [Loading & Validating Win32_OperatingSystem Info] ------------------------------------------------
+            # Build Win32_OperatingSystem query splat.
+            New-Variable @varSplat -Name:'Win32OSQuery' -Value:(@{
+                ClassName  = 'Win32_OperatingSystem';
+                NameSpace  = 'root\CIMV2';
+                Property   = 'BuildNumber','Caption','Description','OSArchitecture','OSType','Version',
+                            'PortableOperatingSystem','ProductType','SystemDrive','WindowsDirectory'
+                CimSession = $LocalCimSession
+            })
 
-        # Initalize CIM Session
-        New-Variable -Force -Name:'LocalCimSession' -Value:(New-CimSession -ComputerName:"localhost" –SessionOption (New-CimSessionOption –Protocol:'DCOM'))
+            Try {$lMSG = 'Querying Win32_OperatingSystem information: {0}'
+                New-Variable @varSplat -Name:'OperatingSystem' -Value:(Get-CimInstance @Win32OSQuery |
+                    Select-Object -Property:$Win32OSQuery.Property)
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Catch {Write-Error -ErrorId:'22' -Message:($lMSG -f 'Failure')}
 
-        # Load OS Information
-        New-Variable -Force -Name Win32OSQuery -Value @{
-            ClassName  = 'Win32_OperatingSystem';
-            NameSpace  = 'root\CIMV2';
-            Property   = 'BuildNumber','Caption','Description','OSArchitecture','OSType','Version',
-                         'PortableOperatingSystem','ProductType','SystemDrive','WindowsDirectory'
-            CimSession = $LocalCimSession
+            $lMSG='Checking if Windows OS supports bitlocker encryption: {0}'
+            If ($OperatingSystem.Version -Match "^((6\.[2|3])|1[0|1]\.0)(.[0-9]+)*$") {
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Else {
+                Write-Error -ErrorId:'23' -Message:($lMSG -f 'Failure')
+            }
+
+            $lMSG='Checking if Windows OS role is Workstation: {0}'
+            If ($OperatingSystem.ProductType -eq 1) {
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Else {
+                Write-Error -ErrorId:'24' -Message:($lMSG -f 'Failure')
+            }
+        #endregion [Loading & Validating Win32_OperatingSystem Info] ---------------------------------------------
+
+        #region [Loading & Validating Win32_ComputerSystem Info] -------------------------------------------------
+            # Build Win32_ComputerSystem query splat.
+            New-Variable @varSplat -Name Win32CSQuery -Value @{
+                ClassName  = 'Win32_ComputerSystem';
+                NameSpace  = 'root/CIMV2';
+                Property   = 'Manufacturer','Model'
+                CimSession = $LocalCimSession
+            }
+
+            Try {$lMSG = 'Querying Win32_ComputerSystem information: {0}'
+                New-Variable @varSplat -Name:'ComputerSystem' -Value:(Get-CimInstance @Win32CSQuery |
+                    Select-Object -Property:$Win32CSQuery.Property)
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Catch {Write-Error -ErrorId:'25' -Message:($lMSG -f 'Failure')}
+        #endregion [Loading & Validating Win32_ComputerSystem Info] ----------------------------------------------
+
+        #region [Loading & Validating BDEHDCFG] ------------------------------------------------------------------
+            Try {$lMSG = 'Loading BDEHDCFG state: {0}'
+                New-Variable @varSplat -Name:'BdeHdCfg' -Value:(Start-BdeHdCfg)
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Catch {Write-Error -ErrorId:'26' -Message:($lMSG -f 'Failure')}
+        #endregion [Loading & Validating BDEHDCFG] ---------------------------------------------------------------
+
+        #region [Loading & Validating TPM] -----------------------------------------------------------------------
+            Try {$lMSG = 'Loading TPM information: {0}'
+                New-Variable @varSplat -Name:'TPM' -Value:(Get-TargetTPM)
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Catch {Write-Error -ErrorId:'27' -Message:($lMSG -f 'Failure')}
+
+            $lMSG='Checking if TPM was found: {0}'
+            If (-Not [String]::IsNullOrEmpty($TPM)) {
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Pass')
+
+                $lMSG='Checking TPM information meets minimum version of 1.2: {0}'
+                If ($TPM.PhysicalPresenceVersionInfo -ge '1.2') {
+                    Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Pass')
+                } Else {
+                    Write-Error -ErrorId:'29' -Message:($lMSG -f 'Failure')
+                }
+            } Else {
+                Write-Error -ErrorId:'28' -Message:($lMSG -f 'Failure')
+            }
+
+            Try {$lMSG = 'Checking TPM initialization status: {0}'
+                $TPM | Add-Member -Force -MemberType:'NoteProperty' -Name:'InitializeStatus' -Value:(
+                    [PSObject]@(Initialize-Tpm))
+                Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+            } Catch {Write-Error -ErrorId:'30' -Message:($lMSG -f 'Failure')}
+        #endregion [Loading & Validating TPM] --------------------------------------------------------------------
+
+    #endregion [Loading System Information] ----------------------------------------------------------------------
+
+    #region [Ensure Bitlocker OS Volume Readiness] ---------------------------------------------------------------
+
+        If ($BdeHdCfg.Status -ne 'Configured') {
+            Write-nLog -Type:'Warning' -Message:'This functionality is not very robust, may not work.'
+            Try {$lMSG='Ensuring Defrag service is enabled:'
+                Get-Service -Name:'defragsvc' | Set-Service -Status:'Running'
+                Write-nLog -Type:'Info' -Message:($lMSG -f 'Success')
+            } Catch {Write-Error -ErrorId:'30' -Message:($lMSG -f 'Failure')}
+
+            Try {$lMSG='Attempting to create Bitlocker partition on OS drive:'
+                BdeHdCfg -target $env:SystemDrive shrink -quiet
+                Write-nLog -Type:'Info' -Message:($lMSG -f 'Success')
+                $RestartRequired = $True
+            } Catch {Write-Error -ErrorId:'30' -Message:($lMSG -f 'Failure')}
         }
-        New-Variable -Force -Name:'OperatingSystem' -Value:(Get-CimInstance @Win32OSQuery | Select-Object -Property:$Win32OSQuery.Property)
 
-        # Verify OS Applicability
-        If (($OperatingSystem.Version -NotMatch "^((6\.[2|3])|10\.0)(.[0-9]+)*$")) {
-            Write-Error -Message:'Invalid windows version.'
-            Exit 1
-        } ElseIf ($OperatingSystem.ProductType -NE 1) {
-            Write-Error -Message:'Script only to be used on windows client systems.'
-            Exit 2
+        If ($RestartRequired) { Start-Restart; Invoke-Command -ScriptBlock:$EndScript -NoNewScope}
+    #endregion [Ensure Bitlocker OS Volume Readiness] ------------------------------------------------------------
+
+    #region [Initialize TPM] -------------------------------------------------------------------------------------
+
+        Write-nLog -Type:'Info' -Message:('TPM Ititalized: {0}' -f $TPM.IsEnabled_InitialValue)
+        If ($TPM.IsEnabled_InitialValue -eq $False) {
+            Try { $lMSG='Initializing TPM: {0}'
+                Initialize-Tpm -AllowClear -AllowPhysicalPresence
+                Write-nLog -Type:'Info' -Message:($lMSG -f 'Success')
+            } Catch {
+                Write-Error -ErrorId:'31' -Message:($lMSG -f 'Failure')
+            }
         }
 
-        # Load Hardware Information
-        New-Variable -Force -Name Win32CSQuery -Value @{
-            ClassName  = 'Win32_ComputerSystem';
-            NameSpace  = 'root/CIMV2';
-            Property   = 'Manufacturer','Model'
-            CimSession = $LocalCimSession
-        }
-        New-Variable -Force -Name:'ComputerSystem' -Value:(Get-CimInstance @Win32CSQuery | Select-Object -Property:$Win32CSQuery.Property)
+    #endregion [Initialize TPM],#')}]#")}]#'")}] -----------------------------------------------------------------
 
-        #
-        New-Variable -Force -Name:'BdeHdCfg' -Value:(Start-BdeHdCfg)
-
-    #endregion [Loading System Information] ---------------------------------------------------------
-
-    #region [Ensure TPM Availability] ---------------------------------------------------------------
-
-    #Load TPM information.
-        New-Variable -Force -Name:'TPM' -Value:(Get-TargetTPM)
-
-        # If no TPM is found, attempt to enable TPM.
-        If ([string]::IsNullOrEmpty($TPM)) {
-            Throw "No TPM found"
-        }
-
-        # If enabling TPM required restart, do so.
-
-        If ($RestartRequired -eq $True) {
-            Restart-Computer -Force -WhatIf
-        }
-
-        If ($Null -ne $TPM) {
-            # If TPM is not enabled, attempt to initalize it.
-            $TPM |Add-Member -Force -MemberType:'NoteProperty' -Name:'InitializeStatus' -Value:([PSObject]@(Initialize-Tpm -AllowClear -AllowPhysicalPresence))
-        }
-    #endregion [Ensure TPM Availability] -----------------------------------------------------
-
-    #region [Configure Bitlocker Settings] -----------------------------------------------------------
+    #region [Configure Bitlocker Settings] -----------------------------------------------------------------------
         New-Variable -Force -Name:'BitlockerSettings' -Value:@(
             @('ActiveDirectoryBackup','1'),@('RequireActiveDirectoryBackup','1'),@('OSRecoveryPassword','2'),
             @('ActiveDirectoryInfoToStore','1'), @('EncryptionMethodNoDiffuser','3'),@('OSRecoveryKey','2'),
@@ -908,46 +1008,90 @@
         )
 
         #Ensure Registry is set properly.
+        New-Variable @varSplat -Name:'RegistryChanges' -Value:([Int]0)
         ForEach ($Setting in $BitLockerSettings) {
-            Set-RegistryKey -DataType:'REG_DWORD' -Name:$Setting[0] -Value:$Setting[1] `
-                -RegistryHive:'HKEY_LOCAL_MACHINE' -Path:'SOFTWARE\Policies\Microsoft\FVE'
-        }
-    #endregion [Configure Bitlocker],#')}]#")}]#'")}] -------------------------------------------------
-
-    #region [Verify Bitlocker Recovery Options] ------------------------------------------------------------------
-
-        <# Debug Tool
-            (Get-BitLockerVolume -MountPoint:$env:SystemDrive).KeyProtector |ForEach-Object -Process:({
-                Remove-BitLockerKeyProtector -MountPoint:$env:SystemDrive -KeyProtectorId:$_.KeyProtectorID
-            })
-        #>
-        ForEach ($Protector in @('RecoveryPasswordProtector','TpmProtector')) {
-            If ($BitLockerVolume.KeyProtector.Where({$_.KeyProtectorType -eq $Protector}).count -eq 0) {
-                $tSplat = @{"$($Protector)" = $True}
-                $Null = (Add-BitLockerKeyProtector -MountPoint:$env:SystemDrive @tSplat -OutVariable:$Null) |Out-Null
-            }
-            Set-Variable -Force -Name:'BitlockerVolume' -Value:(Get-BitLockerVolume -MountPoint:$env:SystemDrive)
+            $RegistryChanges += (Set-RegistryKey -DataType:'DWORD' -Name:$Setting[0] -Value:$Setting[1] `
+                -RegistryHive:'HKEY_LOCAL_MACHINE' -Path:'SOFTWARE\Policies\Microsoft\FVE').changes
         }
 
-    #endregion [Verify Bitlocker Recovery Options] ---------------------------------------------------------------
+        If ($RegistryChanges -gt 0) { $RestartRequired = $True }
 
-    #region [Enable Bitlocker] -----------------------------------------------------------------------------------
+        If ($RestartRequired) { Start-Restart; Invoke-Command -ScriptBlock:$EndScript -NoNewScope}
 
-        Switch ($BitlockerStatus.VolumeStatus) {
+    #endregion [Configure Bitlocker],#')}]#")}]#'")}] ------------------------------------------------------------
 
-            FullyDecrypted {
-                Enable-BitLocker -MountPoint:$env:SystemDrive -EncryptionMethod:'Aes256' -WhatIf
+    #region [Determine Bitlocker Actions] ------------------------------------------------------------------------
+
+        If (@('EncryptionInProgress','FullyEncrypted') -contains $BitLockerVolume.VolumeStatus) {
+
+            $lMSG='Validating FIPS compliant Bitlocker encryption method: {0} [{1}]' -f '{0}',$BitLockerVolume.EncryptionMethod
+            If (@('Aes256') -contains $BitLockerVolume.EncryptionMethod) {
+                Write-nLog -Type:'Info' -Message:($lMSG -f 'Pass')
+            } Else {
+                Set-Variable @varSplat -Name:'blAction' -Value:'Decrypt'
+                Write-nLog -Type:'Warning' -Message:($lMSG -f 'Failure')
             }
 
-            {@('EncryptionInProgress','FullyEncrypted') -contains $_} {
+        } ElseIf (@('FullyDecrypted') -contains $BitLockerVolume.VolumeStatus) {
+            Set-Variable @varSplat -Name:'blAction' -Value:'Encrypt'
+        } Else {
+            Write-Error -ErrorId:'33' -Message:'Unknown Bitlocker Volume Status: {0}' -f $BitLockerVolume.VolumeStatus
+        }
 
+        Try {$lMSG = 'Loading Bitlocker Volume information: {0}'
+            Set-Variable @varSplat -Name:'BitLockerVolume' -Value:(Get-BitLockerVolume -MountPoint:$env:SystemDrive)
+            Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+        } Catch {Write-Error -ErrorId:'20' -Message:($lMSG -f 'Failure')}
+
+    #endregion [Determine Bitlocker Actions],#')}]#")}]#'")}] ----------------------------------------------------
+
+    #region [Execute Needed Bitlocker Actions] -------------------------------------------------------------------
+        Switch ($blAction) {
+            'Encrypt' {
+                $BitLockerVolume.KeyProtector.Where({$_.KeyProtectorType -eq 'RecoveryPassword'}) |ForEach-Object {
+                    Try {$lMSG='Clearing obsolete RecoveryPassword protectors: {0}'
+                        Remove-BitLockerKeyProtector -MountPoint:$env:SystemDrive -KeyProtectorId:$_.KeyProtectorID
+                        Write-nLog -Type:'Info' -Message:($lMSG -f 'Success')
+                    } Catch {Write-Error -ErrorId:'31' -Message:($lMSG -f 'Failure')}
+                }
+
+                If ($BitLockerVolume.KeyProtector.Where({$_.KeyProtectorType -eq 'Tpm'}).count -eq 0) {
+                    Try {$lMSG='Adding TPM protector: {0}'
+                    [void]($Null=(Add-BitLockerKeyProtector -MountPoint:$env:SystemDrive -TpmProtector)|Out-Null)
+                    Write-nLog -Type:'Info' -Message:($lMSG -f 'Success')
+                    } Catch {Write-Error -ErrorId:'33' -Message:($lMSG -f 'Failure')}
+                }
+
+                Try {$lMSG='Enabling Bitlocker: {0}'
+                    Enable-BitLocker -MountPoint:$env:SystemDrive -EncryptionMethod:'Aes256' -RecoveryPasswordProtector
+                    Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+                } Catch {Write-Error -ErrorId:'34' -Message:($lMSG -f 'Failure')}
+
+            }
+
+            'Decrypt' {
+                Try {$lMSG = 'Disabling Bitlocker Encryption: {0}'
+                    Disable-BitLocker -MountPoint:$env:SystemDrive
+                    Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
+                } Catch {Write-Error -ErrorId:'34' -Message:($lMSG -f 'Failure')}
             }
 
             default {}
         }
 
+
+    #endregion [Execute Needed Bitlocker Actions] -------------------------------------------------------------------
+
+    #region [Backup Bitlocker Recovery Key] ----------------------------------------------------------------------
+        #Ensure each protector is backed up to Active Directory
+        ForEach ($Protector in $BitLockerVolume.KeyProtector.Where({$_.KeyProtectorType -eq 'RecoveryPassword'})) {
+            Try {$lMSG='Backing up RecoveryPassword to Active Directory: {0}'
+                $Null = (Backup-BitLockerKeyProtector -MountPoint:$env:SystemDrive -KeyProtectorId:$Protector.KeyProtectorID)
+                Write-nLog -Type:'Info' -Message:($lMSG -f 'Success')
+            } Catch {Write-Error -ErrorId:'30' -Message:$lMSG.replace('{0}','Failure')}
+        }
+
+        If ($RestartRequired) { Start-Restart; Invoke-Command -ScriptBlock:$EndScript -NoNewScope}
     #endregion [Process Header],#')}]#")}]#'")}] -----------------------------------------------------------------
-
-
 
 #endregion [Main Script],#')}]#")}]#'")}]

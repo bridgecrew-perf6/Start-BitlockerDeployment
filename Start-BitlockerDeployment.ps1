@@ -1,4 +1,4 @@
-<#
+﻿<#
     .SYNOPSIS
     .DESCRIPTION
     .PARAMETER Confirm
@@ -435,8 +435,6 @@
                 Continue
             }
 
-            $ConfirmEnv = '0' -contains $Confim
-            $ConfirmChg = '1','2' -contains $Confim
 
             New-Variable @verSplat -Scope:'Private' -Name:'EndFunction' -Value:([ScriptBlock]::Create({
                 Try {$lMSG='Closing RegistrySubKey: {0}'
@@ -635,7 +633,7 @@
                 1          { $TPM = $TPMs[0] }
                 {$_ -ge 2} {
                     #Select TPM with highest TPM compatibility
-                    $TPM = $TPMs |Sort-Object -Property:'PhysicalPresenceVersionInfo' |Select -First:1
+                    $TPM = $TPMs |Sort-Object -Property:'PhysicalPresenceVersionInfo' |Select-Object -First:1
                 }
                 Default    {
                     Write-Error -Message:"Unknown value for '`$TPMs'. Value: $($TPMs.tostring())"
@@ -996,15 +994,27 @@
 
     #region [Configure Bitlocker Settings] -----------------------------------------------------------------------
         New-Variable -Force -Name:'BitlockerSettings' -Value:@(
-            @('ActiveDirectoryBackup','1'),@('RequireActiveDirectoryBackup','1'),@('OSRecoveryPassword','2'),
-            @('ActiveDirectoryInfoToStore','1'), @('EncryptionMethodNoDiffuser','3'),@('OSRecoveryKey','2'),
-            @('EncryptionMethodWithXtsOs','6'),@('EncryptionMethodWithXtsFdv','6'),@('OSManageDRA','0'),
-            @('EncryptionMethodWithXtsRdv','3'),@('EncryptionMethod','3'),@('FDVRequireActiveDirectoryBackup','1')
-            @('OSHideRecoveryPage','1'),@('OSActiveDirectoryBackup','1'),@('OSActiveDirectoryInfoToStore','1')
-            @('OSRequireActiveDirectoryBackup','1'),@('OSAllowSecureBootForIntegrity','1'),@('OSRecovery','1'),
-            @('FDVManageDRA','0'),@('FDVRecoveryPassword','2'),@('FDVRecoveryKey','2'),@('FDVRecovery','1'),
-            @('FDVActiveDirectoryBackup','1'),@('FDVActiveDirectoryInfoToStore','1'),@('OSEncryptionType','1')
-            @('FDVEncryptionType','1'),@('FDVHideRecoveryPage','1')
+            @('RDVPassphraseLength','16'),@('OSRecoveryPassword','2'),@('ActiveDirectoryBackup','1'),
+            @('FDVEnforcePassphrase','0'),@('OSHardwareEncryption','0'),@('RDVEnforcePassphrase','1'),
+            @('EnableBDEWithNoTPM','0'),@('RDVRecoveryKey','2'),@('FDVManageDRA','1'),@('OSPassphrase','0'),
+            @('FDVActiveDirectoryInfoToStore','1'),@('RDVActiveDirectoryBackup','1'),@('FDVRecoveryKey','2'),
+            @('OSRestrictHardwareEncryptionAlgorithms','0'),@('RDVRecoveryPassword','2'),@('FDVRecovery','1'),
+            @('FDVActiveDirectoryBackup','1'),@('OSActiveDirectoryBackup','1'),@('RDVHardwareEncryption','0'),
+            @('FDVHardwareEncryption','0'),@('RDVPassphrase','1'),@('RDVDisableBDE','0'),@('RDVManageDRA','1'),
+            @('EncryptionMethodWithXtsFdv','7'),@('FDVNoBitLockerToGoReader','0'),@('UseRecoveryPassword','1'),
+            @('EncryptionMethodWithXtsRdv','7'),@('RDVNoBitLockerToGoReader','0'),@('RDVHideRecoveryPage','1'),
+            @('OSRequireActiveDirectoryBackup','1'),@('ActiveDirectoryInfoToStore','1'),@('FDVPassphrase','0'),
+            @('FDVRequireActiveDirectoryBackup','1'),@('RDVActiveDirectoryInfoToStore','1'),@('OSRecovery','1'),
+            @('RDVRequireActiveDirectoryBackup','1'),@('OSAllowSecureBootForIntegrity','1'),@('MinimumPIN','6'),
+            @('OSAllowSoftwareEncryptionFailover','0'),@('RDVPassphraseComplexity','1'),@('UseEnhancedPin','1'),
+            @('FDVRestrictHardwareEncryptionAlgorithms','0'),@('FDVRecoveryPassword','2'),@('OSRecoveryKey','2'),
+            @('FDVAllowSoftwareEncryptionFailover','0'),@('RequireActiveDirectoryBackup','1'),@('UseTPMPIN','0'),
+            @('RDVAllowSoftwareEncryptionFailover','0'),@('OSActiveDirectoryInfoToStore','1'),@('UseTPMKey','0'),
+            @('RDVRestrictHardwareEncryptionAlgorithms','0'),@('EncryptionMethodNoDiffuser','4'),@('UseTPM','1'),
+            @('OSPassphraseASCIIOnly','0'),@('UseAdvancedStartup','1'),@('RDVAllowBDE','0'),@('RDVRecovery','1'),
+            @('FDVEncryptionType','1'),@('RDVEncryptionType','1'),@('UseRecoveryDrive','1'),@('OSManageDRA','1'),
+            @('EncryptionMethodWithXtsOs','7'),@('DisableExternalDMAUnderLock','1'),@('FDVHideRecoveryPage','1'),
+            @('OSHideRecoveryPage','1'),@('RDVConfigureBDE','1'),@('EncryptionMethod','2'),@('UseTPMKeyPIN','0')
         )
 
         #Ensure Registry is set properly.
@@ -1063,7 +1073,7 @@
                 }
 
                 Try {$lMSG='Enabling Bitlocker: {0}'
-                    Enable-BitLocker -MountPoint:$env:SystemDrive -EncryptionMethod:'Aes256' -RecoveryPasswordProtector
+                    Enable-BitLocker -MountPoint:$env:SystemDrive -RecoveryPasswordProtector
                     Write-nLog -Type:'Info' -Message:$lMSG.replace('{0}','Success')
                 } Catch {Write-Error -ErrorId:'34' -Message:($lMSG -f 'Failure')}
 

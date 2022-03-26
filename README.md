@@ -3,4 +3,4 @@
 <img width="150" height="100" src="https://user-images.githubusercontent.com/33955773/160245633-0bfe36e4-96a4-4c53-867c-2c1bded6cfb3.png" align="right" />
 
 # Start-BitlockerDeployment
-Script used to automate the deployment of bitlocker
+The best time to deploy BitLocker is during system build and deployment, the second best time to deploy BitLocker is now. This script is an attempt to enable widespread BitLocker deployments without user or administration intervention. This script uses minimal resources and no external dependencies allowing it to be easily deployed via GPO, SCCM, Kesaya, PDQDeploy or any other method which allows remote elevated script execution.
